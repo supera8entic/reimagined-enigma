@@ -13,6 +13,9 @@ from datetime import datetime
 import logging
 import time
 from functools import lru_cache
+from langchain.tools.base import BaseTool
+
+
 
 # Configure logging with more detail
 logging.basicConfig(
@@ -133,9 +136,15 @@ def retrieve_documents(query: str) -> List[Document]:
         raise
 
 # Placeholder for document retrieval tool
-def retrieve_documents_tool(query: str) -> List[Document]:
-    """Tool for retrieving documents."""
-    return retrieve_documents(query)
+class DocumentRetrievalTool(BaseTool):
+    name = "retrieve_documents"
+    description = "Retrieves documents from RBI website"
+
+    def _run(self, query: str) -> List[Document]:
+        return retrieve_documents(query)
+
+    async def _arun(self, query: str) -> List[Document]:
+        raise NotImplementedError()
 
 # Agents and Tasks with improved error handling
 def create_agents():
@@ -170,7 +179,7 @@ def create_tasks(retrieval_agent, response_agent):
             description="Retrieve RBI documents relevant to the query",
             agent=retrieval_agent,
             expected_output="Documents",  # Fixed: should be string
-            tools=[{"name": "retrieve_documents", "func": retrieve_documents_tool, "description": "Retrieves documents from RBI website"}]  # Fixed: proper tool configuration
+            tools=[DocumentRetrievalTool()]  # Fixed: proper tool configuration
         )
         
         response_task = Task(
