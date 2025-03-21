@@ -7,7 +7,7 @@ import os
 import streamlit as st
 from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew
-from crewai.tools import Tools  # Import Tool from crewai_tools
+from crewai.tools import Tool  # Import Tool from crewai_tools
 from langchain_groq import ChatGroq
 import requests
 from bs4 import BeautifulSoup
