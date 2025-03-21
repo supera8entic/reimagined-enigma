@@ -130,6 +130,7 @@ def create_agents():
     """Create and configure CrewAI agents with error handling."""
     try:
         retrieval_agent = Agent(
+            name="retrieval_agent",
             role="Document Retriever",
             goal="Retrieve relevant RBI documents in real-time",
             backstory="Specialized in fetching compliance data from RBI sources.",
