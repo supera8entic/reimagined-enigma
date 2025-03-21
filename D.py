@@ -1,73 +1,75 @@
+# main.py
+import streamlit as st
 import pysqlite3
 import sys, os
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-import os
-import streamlit as st
-from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew
-
-# Debugging: Print the contents of crewai.tools
-import crewai.tools
-print(dir(crewai.tools))
-
-# Try to import Tool
-try:
-    from crewai.tools import Tool  # Import Tool from crewai_tools
-except ImportError as e:
-    st.error(f"ImportError: {e}")
-    st.stop()
-
+from pydantic import BaseModel, Field
 from langchain_groq import ChatGroq
 import requests
 from bs4 import BeautifulSoup
-from typing import List
+from typing import List, Dict
 from urllib.parse import quote
+from datetime import datetime
+import logging
 
-# Load Groq API key from environment
-groq_api_key = os.getenv("GROQ_API_KEY")
-if not groq_api_key:
-    st.error("GROQ_API_KEY is not set in the environment. Please set it to proceed.")
-    st.stop()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Define the LLM with a specific Groq model
-llm = ChatGroq(model="llama-3.1-70b-versatile", api_key=groq_api_key)
+# Initialize SQLite
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+import sqlite3
 
-# Define Pydantic models for structured data validation
+# Data Models
 class Document(BaseModel):
-    """Model for a single RBI document."""
     content: str = Field(..., description="Text content of the document")
     source: str = Field(..., description="Source URL or identifier")
+    relevance_score: float = Field(0.0, description="Relevance score of the document")
+    last_updated: datetime = Field(None, description="Last update timestamp")
 
 class Documents(BaseModel):
-    """Model for retrieved RBI documents."""
     documents: List[Document]
 
 class ComplianceAdvice(BaseModel):
-    """Model for compliance advice output."""
     advice: str = Field(..., description="Generated compliance advice")
     sources: List[str] = Field(..., description="List of source references")
 
-# Function for real-time document retrieval from RBI search results
+# Configuration
+class Config:
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    CACHE_TTL = 3600  # 1 hour cache
+    MAX_DOCUMENTS = 5
+    TIMEOUT = 10  # seconds
+
+# Initialize LLM
+llm = ChatGroq(
+    model="llama-3.1-70b-versatile",
+    api_key=Config.GROQ_API_KEY
+)
+
+# Document Retrieval Tool
+@st.cache_data(ttl=Config.CACHE_TTL)
 def retrieve_documents(query: str) -> List[Document]:
-    """
-    Retrieves RBI compliance documents in real-time by scraping the RBI search results page.
-    Args:
-        query (str): User input query.
-    Returns:
-        List[Document]: List of validated document objects.
-    """
-    encoded_query = quote(query)
-    url = f"https://www.rbi.org.in/Scripts/SearchResults.aspx?search={encoded_query}"
+    """Retrieve RBI compliance documents in real-time."""
     try:
-        response = requests.get(url, timeout=10)
+        encoded_query = quote(query)
+        url = f"https://www.rbi.org.in/Scripts/SearchResults.aspx?search={encoded_query}"
+        
+        response = requests.get(url, timeout=Config.TIMEOUT)
         response.raise_for_status()
+        
         soup = BeautifulSoup(response.content, "html.parser")
         results = soup.find_all("div", class_="searchResultItem")
+        
         if not results:
-            st.warning("No search results found or unable to parse the page.")
+            logger.warning("No search results found")
             return []
+        
         documents = []
-        for result in results[:5]:
+        for result in results[:Config.MAX_DOCUMENTS]:
             title_elem = result.find("h3")
             if title_elem and title_elem.find("a"):
                 title = title_elem.find("a").text.strip()
@@ -75,100 +77,102 @@ def retrieve_documents(query: str) -> List[Document]:
             else:
                 title = "No title"
                 link = "#"
+            
             snippet_elem = result.find("div", class_="searchResultSnippet")
             snippet = snippet_elem.text.strip() if snippet_elem else "No snippet"
-            documents.append(Document(content=snippet, source=link))
+            
+            documents.append(Document(
+                content=snippet,
+                source=link,
+                relevance_score=calculate_relevance_score(snippet, query)
+            ))
+        
         return documents
     except requests.RequestException as e:
-        st.warning(f"Failed to retrieve documents: {e}")
+        logger.error(f"Failed to retrieve documents: {e}")
         return []
 
-# Wrap the retrieve_documents function in a CrewAI Tool
-retrieve_documents_tool = Tool(
-    name="RBI Document Retriever",
-    description="Fetches real-time RBI compliance documents based on a query by scraping the RBI website.",
-    func=retrieve_documents,
-)
+# Agents and Tasks
+def create_agents():
+    """Create and configure CrewAI agents."""
+    retrieval_agent = Agent(
+        role="Document Retriever",
+        goal="Retrieve relevant RBI documents in real-time",
+        backstory="Specialized in fetching compliance data from RBI sources.",
+        verbose=True,
+        llm=llm
+    )
+    
+    response_agent = Agent(
+        role="Compliance Advisor",
+        goal="Generate actionable RBI compliance advice",
+        backstory="Expert in interpreting RBI regulations.",
+        verbose=True,
+        llm=llm
+    )
+    
+    return retrieval_agent, response_agent
 
-# Define CrewAI agents with the specified LLM and tool
-retrieval_agent = Agent(
-    role="Document Retriever",
-    goal="Retrieve relevant RBI documents in real-time based on the user query",
-    backstory="Specialized in fetching up-to-date compliance data from open sources.",
-    tools=[retrieve_documents_tool],  # Use the Tool object here
-    verbose=True,
-    llm=llm
-)
+def create_tasks():
+    """Create and configure CrewAI tasks."""
+    retrieval_task = Task(
+        description="Retrieve RBI documents relevant to the query",
+        agent=retrieval_agent,
+        expected_output=Documents,
+        tools=[retrieve_documents_tool]
+    )
+    
+    response_task = Task(
+        description="Provide compliance advice based on retrieved documents",
+        agent=response_agent,
+        expected_output=ComplianceAdvice,
+        context=[retrieval_task]
+    )
+    
+    return retrieval_task, response_task
 
-response_agent = Agent(
-    role="Compliance Advisor",
-    goal="Generate actionable RBI compliance advice based on retrieved documents",
-    backstory="Expert in interpreting RBI regulations for practical advice.",
-    verbose=True,
-    llm=llm
-)
-
-# Define tasks with Pydantic-structured outputs
-retrieval_task = Task(
-    description="Retrieve RBI documents relevant to the query: {query}",
-    agent=retrieval_agent,
-    expected_output=Documents,
-    tools=[retrieve_documents_tool],
-)
-
-response_task = Task(
-    description="Provide compliance advice for the query: {query} using retrieved documents",
-    agent=response_agent,
-    expected_output=ComplianceAdvice,
-    context=[retrieval_task],
-)
-
-# Create the crew to manage agents and tasks
-crew = Crew(
-    agents=[retrieval_agent, response_agent],
-    tasks=[retrieval_task, response_task],
-    verbose=True,
-)
-
-# Streamlit UI
-st.title("RBI Compliance Advisory Tool")
-st.markdown("Ask a question about RBI compliance and get real-time advice based on open-source data.")
-
-# User input
-query = st.text_input("Enter your compliance query (e.g., 'What are KYC requirements for transactions?'):")
-if st.button("Get Compliance Advice"):
-    if query.strip():
-        with st.spinner("Processing your query with real-time data..."):
-            try:
-                # Execute the crew with the query
+# Main Application
+def main():
+    """Main application entry point."""
+    st.title("RBI Compliance Advisory Tool")
+    st.markdown("""
+        <style>
+        .stApp {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .query-input {
+            font-size: 16px;
+            padding: 15px;
+        }
+        .result-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    # Query input with templates
+    query = st.text_input(
+        "Enter your compliance query:",
+        placeholder="Type your query or select a template",
+        help="Select from common templates or enter a custom query"
+    )
+    
+    if st.button("Get Compliance Advice"):
+        if not query.strip():
+            st.warning("Please enter a valid query")
+            return
+        
+        try:
+            with st.spinner("Processing your query..."):
                 result = crew.kickoff(inputs={"query": query})
-                # Extract structured outputs
-                retrieved_docs = result.tasks_output[0].output.documents
-                advice_output = result.tasks_output[1].output
-                # Display results
-                st.subheader("Retrieved Documents")
-                for i, doc in enumerate(retrieved_docs, 1):
-                    st.write(f"{i}. **Content**: {doc.content}")
-                    st.write(f"   **Source**: [{doc.source}]({doc.source})")
-                st.subheader("Compliance Advice")
-                st.success(advice_output.advice)
-                st.subheader("Sources Referenced")
-                for i, source in enumerate(advice_output.sources, 1):
-                    st.write(f"{i}. {source}")
-            except Exception as e:
-                st.error(f"An error occurred while processing your query: {e}")
-    else:
-        st.warning("Please enter a valid query.")
+                display_results(result)
+        except Exception as e:
+            logger.error(f"Error processing query: {e}")
+            st.error(f"An error occurred: {str(e)}")
 
-# Footer with implementation notes
-st.markdown("""
----
-**Implementation Notes:**
-- **Open-Source Only**: Uses Streamlit, Pydantic, CrewAI, and Groq with open-source models (e.g., Llama).
-- **Real-Time Data**: Retrieves data by scraping RBI's search results page.
-- **Error Handling**: Includes checks for network failures and invalid queries.
-- **Scalability**: Limits to 5 documents; consider caching or pagination for larger sets.
-- **SmolDocling**: Assumed as document processing; integrated generically in retrieval logic.
-- **Gemini**: Excluded as it’s closed-source; focus is on Groq with open models.
-- Current date: March 21, 2025.
-""")
+if __name__ == "__main__":
+    main()
