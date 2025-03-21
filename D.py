@@ -11,7 +11,7 @@ from typing import List, Dict
 from urllib.parse import quote
 from datetime import datetime
 import logging
-import time  # Added missing import
+import time
 from functools import lru_cache
 
 # Configure logging with more detail
@@ -84,7 +84,7 @@ def retrieve_documents(query: str) -> List[Document]:
     """Retrieve RBI compliance documents in real-time with retry mechanism."""
     try:
         encoded_query = quote(query)
-        url = f"https://www.rbi.org.in/Scripts/SearchResults.aspx?search={encoded_query}"  # Fixed URL construction
+        url = f"https://www.rbi.org.in/Scripts/SearchResults.aspx?search={encoded_query}"
         
         # Implement retry with exponential backoff
         for attempt in range(Config.RETRY_COUNT):
@@ -169,14 +169,14 @@ def create_tasks(retrieval_agent, response_agent):
         retrieval_task = Task(
             description="Retrieve RBI documents relevant to the query",
             agent=retrieval_agent,
-            expected_output=Documents,
-            tools=[retrieve_documents_tool]
+            expected_output="Documents",  # Fixed: should be string
+            tools=[{"name": "retrieve_documents", "func": retrieve_documents_tool, "description": "Retrieves documents from RBI website"}]  # Fixed: proper tool configuration
         )
         
         response_task = Task(
             description="Provide compliance advice based on retrieved documents",
             agent=response_agent,
-            expected_output=ComplianceAdvice,
+            expected_output="ComplianceAdvice",  # Fixed: should be string
             context=[retrieval_task]
         )
         
