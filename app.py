@@ -1,3 +1,8 @@
+__import__('pysqlite3')
+import sys,os
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
+
 import os
 import streamlit as st
 from pydantic import BaseModel, Field
