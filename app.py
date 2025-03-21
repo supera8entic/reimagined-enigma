@@ -7,6 +7,7 @@ import os
 import streamlit as st
 from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew
+from crewai_tools import Tool  # Import Tool from crewai_tools
 from langchain_groq import ChatGroq
 import requests
 from bs4 import BeautifulSoup
@@ -47,16 +48,13 @@ def retrieve_documents(query: str) -> List[Document]:
     Returns:
         List[Document]: List of validated document objects.
     """
-    # Encode query for URL safety
     encoded_query = quote(query)
     url = f"https://www.rbi.org.in/Scripts/SearchResults.aspx?search={encoded_query}"
     
     try:
-        # Send GET request with timeout
         response = requests.get(url, timeout=10)
-        response.raise_for_status()  # Raise exception for HTTP errors
+        response.raise_for_status()
         
-        # Parse HTML
         soup = BeautifulSoup(response.content, "html.parser")
         results = soup.find_all("div", class_="searchResultItem")
         
@@ -65,7 +63,7 @@ def retrieve_documents(query: str) -> List[Document]:
             return []
         
         documents = []
-        for result in results[:5]:  # Limit to first 5 results for performance
+        for result in results[:5]:
             title_elem = result.find("h3")
             if title_elem and title_elem.find("a"):
                 title = title_elem.find("a").text.strip()
@@ -85,12 +83,19 @@ def retrieve_documents(query: str) -> List[Document]:
         st.warning(f"Failed to retrieve documents: {e}")
         return []
 
-# Define CrewAI agents with the specified LLM
+# Wrap the retrieve_documents function in a CrewAI Tool
+retrieve_documents_tool = Tool(
+    name="RBI Document Retriever",
+    description="Fetches real-time RBI compliance documents based on a query by scraping the RBI website.",
+    func=retrieve_documents,
+)
+
+# Define CrewAI agents with the specified LLM and tool
 retrieval_agent = Agent(
     role="Document Retriever",
     goal="Retrieve relevant RBI documents in real-time based on the user query",
     backstory="Specialized in fetching up-to-date compliance data from open sources.",
-    tools=[retrieve_documents],
+    tools=[retrieve_documents_tool],  # Use the Tool object here
     verbose=True,
     llm=llm
 )
@@ -108,14 +113,14 @@ retrieval_task = Task(
     description="Retrieve RBI documents relevant to the query: {query}",
     agent=retrieval_agent,
     expected_output=Documents,
-    tools=[retrieve_documents],
+    tools=[retrieve_documents_tool],
 )
 
 response_task = Task(
     description="Provide compliance advice for the query: {query} using retrieved documents",
     agent=response_agent,
     expected_output=ComplianceAdvice,
-    context=[retrieval_task],  # Use retrieval_task output as context
+    context=[retrieval_task],
 )
 
 # Create the crew to manage agents and tasks
@@ -171,5 +176,5 @@ st.markdown("""
 - **Scalability**: Limits to 5 documents; consider caching or pagination for larger sets.
 - **SmolDocling**: Assumed as document processing; integrated generically in retrieval logic.
 - **Gemini**: Excluded as it’s closed-source; focus is on Groq with open models.
-- Current date: March 20, 2025 (assumed for context).
+- Current date: March 21, 2025.
 """)
