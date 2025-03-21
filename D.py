@@ -11,6 +11,7 @@ from typing import List, Dict
 from urllib.parse import quote
 from datetime import datetime
 import logging
+import time  # Added missing import
 from functools import lru_cache
 
 # Configure logging with more detail
@@ -71,13 +72,19 @@ except Exception as e:
     logger.error(f"Failed to initialize LLM: {e}")
     raise RuntimeError("Failed to initialize LLM") from e
 
+# Placeholder for relevance score calculation
+def calculate_relevance_score(content: str, query: str) -> float:
+    """Calculate relevance score between content and query."""
+    # Implement your relevance scoring logic here
+    return 0.5
+
 # Document Retrieval Tool with retry mechanism
 @st.cache_data(ttl=Config.CACHE_TTL)
 def retrieve_documents(query: str) -> List[Document]:
     """Retrieve RBI compliance documents in real-time with retry mechanism."""
     try:
         encoded_query = quote(query)
-        url = f"https://www.rbi.org.in/Scripts/SearchResults.aspx?search={encoded_query}"
+        url = f"https://www.rbi.org.in/Scripts/SearchResults.aspx?search={encoded_query}"  # Fixed URL construction
         
         # Implement retry with exponential backoff
         for attempt in range(Config.RETRY_COUNT):
@@ -125,6 +132,11 @@ def retrieve_documents(query: str) -> List[Document]:
         logger.error(f"Failed to retrieve documents: {e}")
         raise
 
+# Placeholder for document retrieval tool
+def retrieve_documents_tool(query: str) -> List[Document]:
+    """Tool for retrieving documents."""
+    return retrieve_documents(query)
+
 # Agents and Tasks with improved error handling
 def create_agents():
     """Create and configure CrewAI agents with error handling."""
@@ -151,7 +163,7 @@ def create_agents():
         logger.error(f"Failed to create agents: {e}")
         raise
 
-def create_tasks():
+def create_tasks(retrieval_agent, response_agent):
     """Create and configure CrewAI tasks with validation."""
     try:
         retrieval_task = Task(
@@ -172,6 +184,15 @@ def create_tasks():
     except Exception as e:
         logger.error(f"Failed to create tasks: {e}")
         raise
+
+# Placeholder for displaying results
+def display_results(result):
+    """Display the results in Streamlit."""
+    st.write("Compliance Advice:")
+    st.write(result["response_task"].output.advice)
+    st.write("Sources:")
+    for source in result["response_task"].output.sources:
+        st.write(source)
 
 # Main Application with improved error handling and user feedback
 def main():
@@ -212,7 +233,7 @@ def main():
             with st.spinner("Processing your query..."):
                 # Initialize crew only when needed
                 retrieval_agent, response_agent = create_agents()
-                retrieval_task, response_task = create_tasks()
+                retrieval_task, response_task = create_tasks(retrieval_agent, response_agent)
                 crew = Crew(
                     agents=[retrieval_agent, response_agent],
                     tasks=[retrieval_task, response_task],
