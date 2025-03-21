@@ -5,3 +5,4 @@ langchain-groq
 requests 
 beautifulsoup4
 pysqlite3-binary
+crewai-tools
