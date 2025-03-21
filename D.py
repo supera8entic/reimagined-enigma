@@ -4,7 +4,7 @@ import pysqlite3
 import sys, os
 from crewai import Agent, Task, Crew
 from pydantic import BaseModel, Field
-from langchain_groq import ChatGroq
+from langchain.groq import ChatGroq
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict
