@@ -137,8 +137,8 @@ def retrieve_documents(query: str) -> List[Document]:
 
 # Placeholder for document retrieval tool
 class DocumentRetrievalTool(BaseTool):
-    name = "retrieve_documents"
-    description = "Retrieves documents from RBI website"
+    name="retrieve_documents"
+    description="Retrieves documents from RBI website"
 
     def _run(self, query: str) -> List[Document]:
         return retrieve_documents(query)
